@@ -6,3 +6,4 @@ using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("Microsoft.Azure.Cosmos.Encryption.Custom.Tests" + Microsoft.Azure.Cosmos.Encryption.Custom.AssemblyKeys.TestPublicKey)]
 [assembly: InternalsVisibleTo("Microsoft.Azure.Cosmos.Encryption.Custom.EmulatorTests" + Microsoft.Azure.Cosmos.Encryption.Custom.AssemblyKeys.TestPublicKey)]
+[assembly: InternalsVisibleTo("Microsoft.Azure.Cosmos.Encryption.Custom.Benchmarks" + Microsoft.Azure.Cosmos.Encryption.Custom.AssemblyKeys.TestPublicKey)]

@@ -31,7 +31,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
         {
             return cipherText.Select(b => (byte)(b - 1)).ToArray();
         }
-        
+
         internal static Stream ToStream<T>(T input)
         {
             string s = JsonConvert.SerializeObject(input);
@@ -112,6 +112,16 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                     SensitiveStr = Guid.NewGuid().ToString(),
                     SensitiveInt = new Random().Next()
                 };
+            }
+
+            public static TestDoc CreateRandomBigProperty(string partitionKey = null, int length = 1000)
+            {
+                Random rnd = new Random();
+                const string characters = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+                TestDoc doc = Create(partitionKey);
+                doc.SensitiveStr = new string(Enumerable.Repeat(1, length).Select(x => characters[rnd.Next(0, characters.Length)]).ToArray());
+                return doc;
             }
 
             public Stream ToStream()
