@@ -1,6 +1,5 @@
 ﻿namespace Microsoft.Azure.Cosmos.Encryption.Custom.Benchmarks
 {
-    using System.IO.Compression;
     using BenchmarkDotNet.Attributes;
     using Microsoft.Data.Encryption.Cryptography;
     using Moq;
@@ -18,19 +17,19 @@
         [GlobalSetup]
         public void Setup()
         {
-            DataEncryptionKeyProperties dekProperties = new (
+            DataEncryptionKeyProperties dekProperties = new(
                 "id",
                 CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized,
                 DekData,
                 new EncryptionKeyWrapMetadata("name", "value"), DateTime.UtcNow);
 
-            Mock<EncryptionKeyStoreProvider> storeProvider = new ();
+            Mock<EncryptionKeyStoreProvider> storeProvider = new();
             storeProvider
                 .Setup(x => x.UnwrapKey(It.IsAny<string>(), It.IsAny<KeyEncryptionKeyAlgorithm>(), It.IsAny<byte[]>()))
                 .Returns(DekData);
 
             MdeEncryptionAlgorithm mdeDek = new(dekProperties, EncryptionType.Deterministic, storeProvider.Object, cacheTimeToLive: null);
-            
+
             Mock<DataEncryptionKeyProvider> keyProvider = new();
             keyProvider
                 .Setup(x => x.FetchDataEncryptionKeyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -44,28 +43,14 @@
         [Benchmark]
         public async Task EncryptDecrypt_NoCompression()
         {
-            EncryptionOptions encryptionOptions = CreateEncryptionOptions();            
+            EncryptionOptions encryptionOptions = CreateEncryptionOptions(CompressionAlgorithm.None);
             await this.EncryptDecrypt(encryptionOptions);
         }
 
         [Benchmark]
-        public async Task EncryptDecrypt_CompressionFastest()
+        public async Task EncryptDecrypt_CompressionDeflate()
         {
-            EncryptionOptions encryptionOptions = CreateEncryptionOptions(CompressionLevel.Fastest);
-            await this.EncryptDecrypt(encryptionOptions);
-        }
-
-        [Benchmark]
-        public async Task EncryptDecrypt_CompressionOptimal()
-        {
-            EncryptionOptions encryptionOptions = CreateEncryptionOptions(CompressionLevel.Optimal);
-            await this.EncryptDecrypt(encryptionOptions);
-        }
-
-        [Benchmark]
-        public async Task EncryptDecrypt_CompressionSmallestSize()
-        {
-            EncryptionOptions encryptionOptions = CreateEncryptionOptions(CompressionLevel.SmallestSize);
+            EncryptionOptions encryptionOptions = CreateEncryptionOptions(CompressionAlgorithm.Deflate);
             await this.EncryptDecrypt(encryptionOptions);
         }
 
@@ -78,22 +63,16 @@
                  new CosmosDiagnosticsContext(),
                  CancellationToken.None);
 
-            long encryptedLength = encryptedStream.Length;
-
             (Stream decryptedStream, DecryptionContext decryptionContext) = await EncryptionProcessor.DecryptAsync(
                 encryptedStream,
                 this.encryptor,
                 new CosmosDiagnosticsContext(),
                 CancellationToken.None);
 
-            //long decryptedLength = decryptedStream.Length;
-            //string compression = encryptionOptions.CompressionOptions?.CompressionLevel.ToString() ?? "None";
-            //Console.WriteLine($"Compression: {compression}, plaintext length: {decryptedLength}, encrypted length: {encryptedLength}, final size ratio: {encryptedLength * 100 / decryptedLength}%");
-
             decryptedStream.Dispose();
         }
 
-        private static EncryptionOptions CreateEncryptionOptions(CompressionLevel? level = null)
+        private static EncryptionOptions CreateEncryptionOptions(CompressionAlgorithm? compressionAlgorithm)
         {
             EncryptionOptions options = new()
             {
@@ -102,11 +81,11 @@
                 PathsToEncrypt = TestDoc.PathsToEncrypt
             };
 
-            if (level.HasValue)
+            if (compressionAlgorithm.HasValue)
             {
                 options.CompressionOptions = new CompressionOptions
                 {
-                    CompressionLevel = level.Value,
+                    Algorithm = compressionAlgorithm.Value,
                 };
             }
 

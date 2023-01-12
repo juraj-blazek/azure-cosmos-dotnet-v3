@@ -4,16 +4,19 @@
 
 namespace Microsoft.Azure.Cosmos.Encryption.Custom
 {
-    using System.IO.Compression;
-
     /// <summary>
     /// Options for compression of encrypted data.
     /// </summary>
     internal sealed class CompressionOptions
     {
         /// <summary>
-        /// Gets or sets the compression level to be used.
+        /// Gets or sets the compression algorithm to use.
         /// </summary>
-        internal CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Fastest;
+        internal CompressionAlgorithm Algorithm { get; set; } = CompressionAlgorithm.Deflate;
+
+        /// <summary>
+        /// Gets or sets the minimum property size to apply compression.
+        /// </summary>
+        internal int PropertySizeThreshold { get; set; } = 0;
     }
 }

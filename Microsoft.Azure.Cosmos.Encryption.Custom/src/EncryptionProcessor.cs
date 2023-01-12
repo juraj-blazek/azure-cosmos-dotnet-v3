@@ -5,6 +5,7 @@
 namespace Microsoft.Azure.Cosmos.Encryption.Custom
 {
     using System;
+    using System.Buffers.Binary;
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
@@ -22,6 +23,15 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
     /// </summary>
     internal static class EncryptionProcessor
     {
+        private const int Int32Size = sizeof(int);
+        private const int TypeMarkerIndex = 0;
+        private const int DataIndex = TypeMarkerIndex + 1;
+
+        private const int CompressedAlgorithmIndex = TypeMarkerIndex + 1;
+        private const int CompressedOriginalDataSizeIndex = CompressedAlgorithmIndex + 1;
+        private const int CompressedTypeMarkerIndex = CompressedOriginalDataSizeIndex + Int32Size;
+        private const int CompressedDataIndex = CompressedTypeMarkerIndex + 1;
+
         private static readonly SqlSerializerFactory SqlSerializerFactory = new SqlSerializerFactory();
 
         // UTF-8 encoding.
@@ -79,8 +89,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             EncryptionProperties encryptionProperties = null;
             byte[] plainText = null;
             byte[] cipherText = null;
-            bool compressed;
-            TypeMarker typeMarker;
+            SerializationResult serialized;
 
             switch (encryptionOptions.EncryptionAlgorithm)
             {
@@ -99,10 +108,10 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                             continue;
                         }
 
-                        (compressed, typeMarker, plainText) = EncryptionProcessor.Serialize(propertyValue, encryptionOptions.CompressionOptions);
+                        serialized = EncryptionProcessor.Serialize(propertyValue, encryptionOptions.CompressionOptions);
 
                         cipherText = await encryptor.EncryptAsync(
-                            plainText,
+                            serialized.Data,
                             encryptionOptions.DataEncryptionKeyId,
                             encryptionOptions.EncryptionAlgorithm);
 
@@ -111,22 +120,27 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                             throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
                         }
 
-                        int offset = 1;
-                        if (compressed)
+                        int offset = DataIndex;
+                        if (serialized.CompressionAlgorithm != CompressionAlgorithm.None)
                         {
-                            offset = 2;
+                            offset = CompressedDataIndex;
                         }
 
                         byte[] cipherTextWithTypeMarker = new byte[cipherText.Length + offset];
 
-                        if (compressed)
+                        if (serialized.CompressionAlgorithm != CompressionAlgorithm.None)
                         {
-                            cipherTextWithTypeMarker[0] = (byte)TypeMarker.Compressed;
-                            cipherTextWithTypeMarker[1] = (byte)typeMarker;
+                            cipherTextWithTypeMarker[TypeMarkerIndex] = (byte)TypeMarker.Compressed;
+                            cipherTextWithTypeMarker[CompressedAlgorithmIndex] = (byte)serialized.CompressionAlgorithm;
+
+                            Memory<byte> dataSize = new(cipherTextWithTypeMarker, CompressedOriginalDataSizeIndex, Int32Size);
+                            BinaryPrimitives.WriteInt32BigEndian(dataSize.Span, serialized.UncompressedDataLength);
+
+                            cipherTextWithTypeMarker[CompressedTypeMarkerIndex] = (byte)serialized.TypeMarker;
                         }
                         else
                         {
-                            cipherTextWithTypeMarker[0] = (byte)typeMarker;
+                            cipherTextWithTypeMarker[TypeMarkerIndex] = (byte)serialized.TypeMarker;
                         }
 
                         Buffer.BlockCopy(cipherText, 0, cipherTextWithTypeMarker, offset, cipherText.Length);
@@ -304,13 +318,19 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                 }
 
                 int dataIndex = 1;
-                bool compressed = false;
-                TypeMarker typeMarker = (TypeMarker)cipherTextWithTypeMarker[0];
+                CompressionAlgorithm compressionAlgorithm = CompressionAlgorithm.None;
+                TypeMarker typeMarker = (TypeMarker)cipherTextWithTypeMarker[TypeMarkerIndex];
+                int originalDataLength = 0;
+
                 if (typeMarker == TypeMarker.Compressed)
                 {
-                    dataIndex = 2;
-                    typeMarker = (TypeMarker)cipherTextWithTypeMarker[1];
-                    compressed = true;
+                    dataIndex = CompressedDataIndex;
+                    compressionAlgorithm = (CompressionAlgorithm)cipherTextWithTypeMarker[CompressedAlgorithmIndex];
+
+                    Memory<byte> dataSize = new(cipherTextWithTypeMarker, CompressedOriginalDataSizeIndex, Int32Size);
+                    originalDataLength = BinaryPrimitives.ReadInt32BigEndian(dataSize.Span);
+
+                    typeMarker = (TypeMarker)cipherTextWithTypeMarker[CompressedTypeMarkerIndex];
                 }
 
                 int dataLength = cipherTextWithTypeMarker.Length - dataIndex;
@@ -325,10 +345,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                     diagnosticsContext,
                     cancellationToken);
 
-                if (compressed)
-                {
-                    plainText = Decompress(plainText);
-                }
+                plainText = TryDecompress(plainText, compressionAlgorithm, originalDataLength);
 
                 EncryptionProcessor.DeserializeAndAddProperty(
                     typeMarker,
@@ -501,59 +518,81 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             return encryptionPropertiesJObj;
         }
 
-        private static (bool compressed, TypeMarker marker, byte[]) Serialize(JToken propertyValue, CompressionOptions compressionOptions)
+        private static SerializationResult Serialize(JToken propertyValue, CompressionOptions compressionOptions)
         {
-            bool compressed;
-            byte[] data;
             switch (propertyValue.Type)
             {
                 case JTokenType.Undefined:
                     Debug.Assert(false, "Undefined value cannot be in the JSON");
-                    return (false, default, null);
+                    return SerializationResult.Undefined;
                 case JTokenType.Null:
                     Debug.Assert(false, "Null type should have been handled by caller");
-                    return (false, TypeMarker.Null, null);
+                    return SerializationResult.Null;
                 case JTokenType.Boolean:
-                    return (false, TypeMarker.Boolean, SqlSerializerFactory.GetDefaultSerializer<bool>().Serialize(propertyValue.ToObject<bool>()));
+                    return SerializationResult.Uncompressed(TypeMarker.Boolean, SqlSerializerFactory.GetDefaultSerializer<bool>().Serialize(propertyValue.ToObject<bool>()));
                 case JTokenType.Float:
-                    return (false, TypeMarker.Double, SqlSerializerFactory.GetDefaultSerializer<double>().Serialize(propertyValue.ToObject<double>()));
+                    return SerializationResult.Uncompressed(TypeMarker.Double, SqlSerializerFactory.GetDefaultSerializer<double>().Serialize(propertyValue.ToObject<double>()));
                 case JTokenType.Integer:
-                    return (false, TypeMarker.Long, SqlSerializerFactory.GetDefaultSerializer<long>().Serialize(propertyValue.ToObject<long>()));
+                    return SerializationResult.Uncompressed(TypeMarker.Long, SqlSerializerFactory.GetDefaultSerializer<long>().Serialize(propertyValue.ToObject<long>()));
                 case JTokenType.String:
-                    (compressed, data) = TryCompress(SqlVarCharSerializer.Serialize(propertyValue.ToObject<string>()), compressionOptions);
-                    return (compressed, TypeMarker.String, data);
+                    return SerializeVarChar(TypeMarker.String, propertyValue.ToObject<string>(), compressionOptions);
                 case JTokenType.Array:
-                    (compressed, data) = TryCompress(SqlVarCharSerializer.Serialize(propertyValue.ToString()), compressionOptions);
-                    return (compressed, TypeMarker.Array, data);
+                    return SerializeVarChar(TypeMarker.Array, propertyValue.ToString(), compressionOptions);
                 case JTokenType.Object:
-                    (compressed, data) = TryCompress(SqlVarCharSerializer.Serialize(propertyValue.ToString()), compressionOptions);
-                    return (compressed, TypeMarker.Object, data);
+                    return SerializeVarChar(TypeMarker.Object, propertyValue.ToString(), compressionOptions);
                 default:
                     throw new InvalidOperationException($" Invalid or Unsupported Data Type Passed : {propertyValue.Type}");
             }
         }
 
-        private static (bool, byte[]) TryCompress(byte[] input, CompressionOptions compressionOptions)
+        private static SerializationResult SerializeVarChar(TypeMarker typeMarker, string propertyValue, CompressionOptions compressionOptions)
         {
-            if (compressionOptions == null)
-            {
-                return (false, input);
-            }
-
-            using MemoryStream ms = new ();
-            using DeflateStream gz = new (ms, compressionOptions.CompressionLevel);
-            gz.Write(input, 0, input.Length);
-            gz.Flush();
-            return (true, ms.ToArray());
+            byte[] serialized = SqlVarCharSerializer.Serialize(propertyValue);
+            (CompressionAlgorithm compressionAlgorithm, byte[] data) = TryCompress(serialized, compressionOptions);
+            return SerializationResult.Compressed(compressionAlgorithm, typeMarker, data, serialized.Length);
         }
 
-        private static byte[] Decompress(byte[] input)
+        private static (CompressionAlgorithm compressionAlgorithm, byte[]) TryCompress(byte[] input, CompressionOptions compressionOptions)
+        {
+            if (compressionOptions == null || input.Length < compressionOptions.PropertySizeThreshold)
+            {
+                return (CompressionAlgorithm.None, input);
+            }
+
+            return compressionOptions.Algorithm switch
+            {
+                CompressionAlgorithm.None => (CompressionAlgorithm.None, input),
+                CompressionAlgorithm.Deflate => (CompressionAlgorithm.Deflate, CompressDeflate(input)),
+                _ => throw new NotSupportedException(),
+            };
+        }
+
+        private static byte[] TryDecompress(byte[] input, CompressionAlgorithm compressionAlgorithm, int originalDataSize)
+        {
+            return compressionAlgorithm switch
+            {
+                CompressionAlgorithm.None => input,
+                CompressionAlgorithm.Deflate => DecompressDeflate(input, originalDataSize),
+                _ => throw new NotSupportedException(),
+            };
+        }
+
+        private static byte[] CompressDeflate(byte[] input)
+        {
+            using MemoryStream ms = new (input.Length);
+            using DeflateStream gz = new (ms, CompressionLevel.Fastest);
+            gz.Write(input, 0, input.Length);
+            gz.Flush();
+            return ms.ToArray();
+        }
+
+        private static byte[] DecompressDeflate(byte[] input, int originalDataSize)
         {
             using MemoryStream msIn = new (input);
-            using MemoryStream msOut = new ();
+            using MemoryStream msOut = new (originalDataSize);
             using DeflateStream gz = new (msIn, CompressionMode.Decompress);
             gz.CopyTo(msOut);
-            return msOut.ToArray();
+            return msOut.GetBuffer();
         }
 
         private static void DeserializeAndAddProperty(
@@ -633,6 +672,39 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             // the contents of contentJObj get decrypted in place for MDE algorithm model, and for legacy model _ei property is removed
             // and corresponding decrypted properties are added back in the documents.
             return EncryptionProcessor.BaseSerializer.ToStream(contentJObj);
+        }
+
+        private class SerializationResult
+        {
+            public CompressionAlgorithm CompressionAlgorithm { get; }
+
+            public TypeMarker TypeMarker { get; }
+
+            public byte[] Data { get; }
+
+            public int UncompressedDataLength { get; }
+
+            private SerializationResult(CompressionAlgorithm compressionAlgorithm, TypeMarker typeMarker, byte[] data, int uncompressedDataLength)
+            {
+                this.CompressionAlgorithm = compressionAlgorithm;
+                this.TypeMarker = typeMarker;
+                this.Data = data;
+                this.UncompressedDataLength = uncompressedDataLength;
+            }
+
+            public static SerializationResult Undefined => Uncompressed(default);
+
+            public static SerializationResult Null => Uncompressed(TypeMarker.Null);
+
+            public static SerializationResult Uncompressed(TypeMarker typeMarker, byte[] data = default)
+            {
+                return new SerializationResult(CompressionAlgorithm.None, typeMarker, data, 0);
+            }
+
+            public static SerializationResult Compressed(CompressionAlgorithm compressionAlgorithm, TypeMarker typeMarker, byte[] data, int uncompressedDataLength)
+            {
+                return new SerializationResult(compressionAlgorithm, typeMarker, data, uncompressedDataLength);
+            }
         }
     }
 }

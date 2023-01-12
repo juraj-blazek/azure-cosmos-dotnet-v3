@@ -7,7 +7,6 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
     using System;
     using System.Collections.Generic;
     using System.IO;
-    using System.IO.Compression;
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
@@ -35,7 +34,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                 .ReturnsAsync((byte[] plainText, string dekId, string algo, CancellationToken t) =>
                     dekId == MdeEncryptionProcessorTests.dekId ? TestCommon.EncryptData(plainText) : throw new InvalidOperationException("DEK not found."));
             MdeEncryptionProcessorTests.mockEncryptor.Setup(m => m.DecryptAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((byte[] cipherText, string dekId, string algo, CancellationToken t) => 
+                .ReturnsAsync((byte[] cipherText, string dekId, string algo, CancellationToken t) =>
                     dekId == MdeEncryptionProcessorTests.dekId ? TestCommon.DecryptData(cipherText) : throw new InvalidOperationException("Null DEK was returned."));
         }
 
@@ -114,7 +113,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
 
         [TestMethod]
         public async Task EncryptDecryptPropertyWithNullValue()
-        {        
+        {
             TestDoc testDoc = TestDoc.Create();
             testDoc.SensitiveStr = null;
 
@@ -136,15 +135,15 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
         [TestMethod]
         public async Task ValidateEncryptDecryptDocument()
         {
-            Console.WriteLine("| Original size | Compression level | Final size | Ratio |");
+            Console.WriteLine("| Original size | Compression algorithm | Final size | Ratio |");
             Console.WriteLine("| -: | -: | -: | -: |");
-            foreach (int propertyLength in new[] { 10, 100, 1_000, 10_000, 1_000_000 })
+            foreach (int propertyLength in new[] { 100, 200, 500, 1_000, 5_000, 10_000, 100_000, 1_000_000 })
             {
                 TestDoc testDoc = TestDoc.CreateRandomBigProperty(length: propertyLength);
 
-                foreach (CompressionLevel? level in new[] { (CompressionLevel?)null, CompressionLevel.Fastest, CompressionLevel.Optimal, CompressionLevel.SmallestSize })
+                foreach (CompressionAlgorithm compressionAlgorithm in new[] { CompressionAlgorithm.None, CompressionAlgorithm.Deflate })
                 {
-                    this.encryptionOptions.CompressionOptions = level.HasValue ? new CompressionOptions { CompressionLevel = level.Value } : null;
+                    this.encryptionOptions.CompressionOptions = new CompressionOptions { Algorithm = compressionAlgorithm };
 
                     JObject encryptedDoc = await this.VerifyEncryptionSucceeded(testDoc);
                     int encryptedLength = encryptedDoc.ToString(Formatting.None).Length;
@@ -162,11 +161,10 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                         decryptionContext);
 
                     int decryptedLength = decryptedDoc.ToString(Formatting.None).Length;
-                    string compression = this.encryptionOptions.CompressionOptions?.CompressionLevel.ToString() ?? "None";
 
-                    Console.WriteLine($"| {decryptedLength} | {compression} | {encryptedLength} | {encryptedLength * 100 / decryptedLength}% |");
+                    Console.WriteLine($"| {decryptedLength} | {compressionAlgorithm} | {encryptedLength} | {encryptedLength * 100 / decryptedLength}% |");
                 }
-            }            
+            }
         }
 
         [TestMethod]
