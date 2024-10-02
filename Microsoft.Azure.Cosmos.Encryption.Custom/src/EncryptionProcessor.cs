@@ -11,6 +11,8 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
     using System.IO;
     using System.Linq;
     using System.Text;
+    using System.Text.Json;
+    using System.Text.Json.Nodes;
     using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Data.Encryption.Cryptography.Serializers;
@@ -79,7 +81,6 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                 }
             }
 
-            JObject itemJObj = EncryptionProcessor.BaseSerializer.FromStream<JObject>(input);
             List<string> pathsEncrypted = new List<string>();
             EncryptionProperties encryptionProperties = null;
             byte[] plainText = null;
@@ -91,106 +92,122 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             switch (encryptionOptions.EncryptionAlgorithm)
             {
                 case CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized:
-
-                    DataEncryptionKey encryptionKey = await encryptor.GetEncryptionKeyAsync(encryptionOptions.DataEncryptionKeyId, encryptionOptions.EncryptionAlgorithm);
-
-                    foreach (string pathToEncrypt in encryptionOptions.PathsToEncrypt)
                     {
-                        string propertyName = pathToEncrypt.Substring(1);
-                        if (!itemJObj.TryGetValue(propertyName, out JToken propertyValue))
+
+                        JsonNode document = JsonNode.Parse(input);
+                        JsonObject itemJObj = document.Root.AsObject();
+
+                        DataEncryptionKey encryptionKey = await encryptor.GetEncryptionKeyAsync(encryptionOptions.DataEncryptionKeyId, encryptionOptions.EncryptionAlgorithm);
+
+                        foreach (string pathToEncrypt in encryptionOptions.PathsToEncrypt)
                         {
-                            continue;
+                            string propertyName = pathToEncrypt.Substring(1);
+                            if (!itemJObj.TryGetPropertyValue(propertyName, out JsonNode propertyValue))
+                            {
+                                continue;
+                            }
+
+                            if (propertyValue == null || propertyValue.GetValueKind() == JsonValueKind.Null)
+                            {
+                                continue;
+                            }
+
+                            (typeMarker, plainText, int plainTextLength) = EncryptionProcessor.Serialize(propertyValue, arrayPoolManager);
+
+                            if (plainText == null)
+                            {
+                                continue;
+                            }
+
+                            int cipherTextLength = encryptionKey.GetEncryptByteCount(plainTextLength);
+
+                            byte[] cipherTextWithTypeMarker = arrayPoolManager.Rent(cipherTextLength + 1);
+
+                            cipherTextWithTypeMarker[0] = (byte)typeMarker;
+
+                            int encryptedBytesCount = encryptionKey.EncryptData(
+                                plainText,
+                                plainTextOffset: 0,
+                                plainTextLength,
+                                cipherTextWithTypeMarker,
+                                outputOffset: 1);
+
+                            if (encryptedBytesCount < 0)
+                            {
+                                throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
+                            }
+
+                            itemJObj[propertyName] = JsonValue.Create(cipherTextWithTypeMarker.AsSpan(0, encryptedBytesCount + 1).ToArray());
+                            pathsEncrypted.Add(pathToEncrypt);
                         }
 
-                        if (propertyValue.Type == JTokenType.Null)
+                        encryptionProperties = new EncryptionProperties(
+                                encryptionFormatVersion: 3,
+                                encryptionOptions.EncryptionAlgorithm,
+                                encryptionOptions.DataEncryptionKeyId,
+                                encryptedData: null,
+                                pathsEncrypted);
+
+                        JsonNode node = System.Text.Json.JsonSerializer.SerializeToNode(encryptionProperties);
+
+                        itemJObj.Add(Constants.EncryptedInfo, node);
+                        input.Dispose();
+
+                        MemoryStream ms = new MemoryStream();
+                        Utf8JsonWriter writer = new Utf8JsonWriter(ms);
+                        System.Text.Json.JsonSerializer.Serialize(writer, document);
+                        ms.Position = 0;
+                        return ms;
+                    }
+                case CosmosEncryptionAlgorithm.AEAes256CbcHmacSha256Randomized:
+                    {
+                        JObject itemJObj = EncryptionProcessor.BaseSerializer.FromStream<JObject>(input);
+                        JObject toEncryptJObj = new JObject();
+
+                        foreach (string pathToEncrypt in encryptionOptions.PathsToEncrypt)
                         {
-                            continue;
+                            string propertyName = pathToEncrypt.Substring(1);
+                            if (!itemJObj.TryGetValue(propertyName, out JToken propertyValue))
+                            {
+                                continue;
+                            }
+
+                            toEncryptJObj.Add(propertyName, propertyValue.Value<JToken>());
+                            itemJObj.Remove(propertyName);
                         }
 
-                        (typeMarker, plainText, int plainTextLength) = EncryptionProcessor.Serialize(propertyValue, arrayPoolManager);
+                        MemoryStream memoryStream = EncryptionProcessor.BaseSerializer.ToStream<JObject>(toEncryptJObj);
+                        Debug.Assert(memoryStream != null);
+                        Debug.Assert(memoryStream.TryGetBuffer(out _));
+                        plainText = memoryStream.ToArray();
 
-                        if (plainText == null)
-                        {
-                            continue;
-                        }
-
-                        int cipherTextLength = encryptionKey.GetEncryptByteCount(plainText.Length);
-
-                        byte[] cipherTextWithTypeMarker = arrayPoolManager.Rent(cipherTextLength + 1);
-
-                        cipherTextWithTypeMarker[0] = (byte)typeMarker;
-
-                        int encryptedBytesCount = encryptionKey.EncryptData(
+                        cipherText = await encryptor.EncryptAsync(
                             plainText,
-                            plainTextOffset: 0,
-                            plainTextLength,
-                            cipherTextWithTypeMarker,
-                            outputOffset: 1);
+                            encryptionOptions.DataEncryptionKeyId,
+                            encryptionOptions.EncryptionAlgorithm,
+                            cancellationToken);
 
-                        if (encryptedBytesCount < 0)
+                        if (cipherText == null)
                         {
                             throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
                         }
 
-                        itemJObj[propertyName] = cipherTextWithTypeMarker.AsSpan(0, encryptedBytesCount + 1).ToArray();
-                        pathsEncrypted.Add(pathToEncrypt);
+                        encryptionProperties = new EncryptionProperties(
+                                encryptionFormatVersion: 2,
+                                encryptionOptions.EncryptionAlgorithm,
+                                encryptionOptions.DataEncryptionKeyId,
+                                encryptedData: cipherText,
+                                encryptionOptions.PathsToEncrypt);
+
+                        itemJObj.Add(Constants.EncryptedInfo, JObject.FromObject(encryptionProperties));
+                        input.Dispose();
+                        return EncryptionProcessor.BaseSerializer.ToStream(itemJObj);
                     }
-
-                    encryptionProperties = new EncryptionProperties(
-                            encryptionFormatVersion: 3,
-                            encryptionOptions.EncryptionAlgorithm,
-                            encryptionOptions.DataEncryptionKeyId,
-                            encryptedData: null,
-                            pathsEncrypted);
-                    break;
-
-                case CosmosEncryptionAlgorithm.AEAes256CbcHmacSha256Randomized:
-
-                    JObject toEncryptJObj = new JObject();
-
-                    foreach (string pathToEncrypt in encryptionOptions.PathsToEncrypt)
-                    {
-                        string propertyName = pathToEncrypt.Substring(1);
-                        if (!itemJObj.TryGetValue(propertyName, out JToken propertyValue))
-                        {
-                            continue;
-                        }
-
-                        toEncryptJObj.Add(propertyName, propertyValue.Value<JToken>());
-                        itemJObj.Remove(propertyName);
-                    }
-
-                    MemoryStream memoryStream = EncryptionProcessor.BaseSerializer.ToStream<JObject>(toEncryptJObj);
-                    Debug.Assert(memoryStream != null);
-                    Debug.Assert(memoryStream.TryGetBuffer(out _));
-                    plainText = memoryStream.ToArray();
-
-                    cipherText = await encryptor.EncryptAsync(
-                        plainText,
-                        encryptionOptions.DataEncryptionKeyId,
-                        encryptionOptions.EncryptionAlgorithm,
-                        cancellationToken);
-
-                    if (cipherText == null)
-                    {
-                        throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
-                    }
-
-                    encryptionProperties = new EncryptionProperties(
-                            encryptionFormatVersion: 2,
-                            encryptionOptions.EncryptionAlgorithm,
-                            encryptionOptions.DataEncryptionKeyId,
-                            encryptedData: cipherText,
-                            encryptionOptions.PathsToEncrypt);
-                    break;
-
                 default:
                     throw new NotSupportedException($"Encryption Algorithm : {encryptionOptions.EncryptionAlgorithm} is not supported.");
             }
 
-            itemJObj.Add(Constants.EncryptedInfo, JObject.FromObject(encryptionProperties));
-            input.Dispose();
-            return EncryptionProcessor.BaseSerializer.ToStream(itemJObj);
+
         }
 
         /// <remarks>
@@ -475,7 +492,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                     MaxDepth = 64, // https://github.com/advisories/GHSA-5crp-9r3c-p9vr
                 };
 
-                itemJObj = JsonSerializer.Create(jsonSerializerSettings).Deserialize<JObject>(jsonTextReader);
+                itemJObj = Newtonsoft.Json.JsonSerializer.Create(jsonSerializerSettings).Deserialize<JObject>(jsonTextReader);
             }
 
             return itemJObj;
@@ -494,44 +511,53 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             return encryptionPropertiesJObj;
         }
 
-        private static (TypeMarker typeMarker, byte[] serializedBytes, int serializedBytesCount) Serialize(JToken propertyValue, ArrayPoolManager arrayPoolManager)
+        private static (TypeMarker typeMarker, byte[] serializedBytes, int serializedBytesCount) Serialize(JsonNode propertyValue, ArrayPoolManager arrayPoolManager)
         {
             byte[] buffer;
             int length;
-            switch (propertyValue.Type)
+            switch (propertyValue.GetValueKind())
             {
-                case JTokenType.Undefined:
+                case JsonValueKind.Undefined:
                     Debug.Assert(false, "Undefined value cannot be in the JSON");
                     return (default, null, -1);
-                case JTokenType.Null:
+                case JsonValueKind.Null:
                     Debug.Assert(false, "Null type should have been handled by caller");
                     return (TypeMarker.Null, null, -1);
-                case JTokenType.Boolean:
-                    (buffer, length) = SerializeFixed(SqlBoolSerializer);
+                case JsonValueKind.True:
+                    (buffer, length) = SerializeFixed(SqlBoolSerializer, true);
                     return (TypeMarker.Boolean, buffer, length);
-                case JTokenType.Float:
-                    (buffer, length) = SerializeFixed(SqlDoubleSerializer);
-                    return (TypeMarker.Double, buffer, length);
-                case JTokenType.Integer:
-                    (buffer, length) = SerializeFixed(SqlLongSerializer);
-                    return (TypeMarker.Long, buffer, length);
-                case JTokenType.String:
-                    (buffer, length) = SerializeString(propertyValue.ToObject<string>());
+                case JsonValueKind.False:
+                    (buffer, length) = SerializeFixed(SqlBoolSerializer, false);
+                    return (TypeMarker.Boolean, buffer, length);
+                case JsonValueKind.Number:
+                    if (propertyValue.AsValue().TryGetValue(out long value))
+                    {
+                        (buffer, length) = SerializeFixed(SqlLongSerializer, value);
+                        return (TypeMarker.Long, buffer, length);
+                    }
+                    else
+                    {
+                        (buffer, length) = SerializeFixed(SqlDoubleSerializer, propertyValue.GetValue<double>());
+                        return (TypeMarker.Double, buffer, length);
+                    }
+
+                case JsonValueKind.String:
+                    (buffer, length) = SerializeString(propertyValue.GetValue<string>());
                     return (TypeMarker.String, buffer, length);
-                case JTokenType.Array:
-                    (buffer, length) = SerializeString(propertyValue.ToString());
+                case JsonValueKind.Array:
+                    (buffer, length) = SerializeString(propertyValue.ToJsonString());
                     return (TypeMarker.Array, buffer, length);
-                case JTokenType.Object:
-                    (buffer, length) = SerializeString(propertyValue.ToString());
+                case JsonValueKind.Object:
+                    (buffer, length) = SerializeString(propertyValue.ToJsonString());
                     return (TypeMarker.Object, buffer, length);
                 default:
-                    throw new InvalidOperationException($" Invalid or Unsupported Data Type Passed : {propertyValue.Type}");
+                    throw new InvalidOperationException($" Invalid or Unsupported Data Type Passed : {propertyValue.GetValueKind()}");
             }
 
-            (byte[], int) SerializeFixed<T>(IFixedSizeSerializer<T> serializer)
+            (byte[], int) SerializeFixed<T>(IFixedSizeSerializer<T> serializer, T value)
             {
                 byte[] buffer = arrayPoolManager.Rent(serializer.GetSerializedMaxByteCount());
-                int length = serializer.Serialize(propertyValue.ToObject<T>(), buffer);
+                int length = serializer.Serialize(value, buffer);
                 return (buffer, length);
             }
 
@@ -582,7 +608,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                 char[] buffer = manager.Rent(SqlVarCharSerializer.GetDeserializedMaxLength(serializedBytes.Length));
                 int length = SqlVarCharSerializer.Deserialize(serializedBytes, buffer.AsSpan());
 
-                JsonSerializer serializer = JsonSerializer.Create(JsonSerializerSettings);
+                Newtonsoft.Json.JsonSerializer serializer = Newtonsoft.Json.JsonSerializer.Create(JsonSerializerSettings);
 
                 using MemoryTextReader memoryTextReader = new MemoryTextReader(new Memory<char>(buffer, 0, length));
                 using JsonTextReader reader = new JsonTextReader(memoryTextReader);
