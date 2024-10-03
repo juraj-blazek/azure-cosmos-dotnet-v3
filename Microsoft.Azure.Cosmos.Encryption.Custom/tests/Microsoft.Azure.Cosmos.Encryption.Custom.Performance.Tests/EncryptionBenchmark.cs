@@ -1,6 +1,7 @@
 ﻿namespace Microsoft.Azure.Cosmos.Encryption.Custom.Performance.Tests
 {
     using System.IO;
+    using System.IO.Compression;
     using BenchmarkDotNet.Attributes;
     using Microsoft.Data.Encryption.Cryptography;
     using Moq;
@@ -25,6 +26,12 @@
         [Params(1, 10, 100)]
         public int DocumentSizeInKb { get; set; }
 
+        [Params(CompressionLevel.Optimal, CompressionLevel.Fastest)]
+        public CompressionLevel CompressionLevel { get; set; }
+
+        [Params(CompressionOptions.CompressionAlgorithm.None, CompressionOptions.CompressionAlgorithm.Deflate, CompressionOptions.CompressionAlgorithm.GZip)]
+        public CompressionOptions.CompressionAlgorithm CompressionAlgorithm { get; set; } = CompressionOptions.CompressionAlgorithm.None;
+
         [GlobalSetup]
         public async Task Setup()
         {
@@ -38,7 +45,7 @@
                 .ReturnsAsync(() => new MdeEncryptionAlgorithm(DekProperties, EncryptionType.Randomized, StoreProvider.Object, cacheTimeToLive: TimeSpan.MaxValue));
 
             this.encryptor = new(keyProvider.Object);
-            this.encryptionOptions = CreateEncryptionOptions();
+            this.encryptionOptions = this.CreateEncryptionOptions();
             this.plaintext = this.LoadTestDoc();
 
             Stream encryptedStream = await EncryptionProcessor.EncryptAsync(
@@ -74,7 +81,7 @@
                 CancellationToken.None);
         }
 
-        private static EncryptionOptions CreateEncryptionOptions()
+        private EncryptionOptions CreateEncryptionOptions()
         {
             EncryptionOptions options = new()
             {
@@ -82,6 +89,8 @@
                 EncryptionAlgorithm = CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized,
                 PathsToEncrypt = TestDoc.PathsToEncrypt
             };
+            options.CompressionOptions.Algorithm = this.CompressionAlgorithm;
+            options.CompressionOptions.CompressionLevel = this.CompressionLevel;
 
             return options;
         }

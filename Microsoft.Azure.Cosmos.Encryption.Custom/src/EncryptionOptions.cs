@@ -35,5 +35,10 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
         /// Example of a path specification: /sensitive
         /// </summary>
         public IEnumerable<string> PathsToEncrypt { get; set; }
+
+        /// <summary>
+        /// Gets or sets configuration of payload compression
+        /// </summary>
+        public CompressionOptions CompressionOptions { get; set; } = new CompressionOptions();
     }
 }

@@ -93,11 +93,15 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             {
                 case CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized:
                     {
-
+                        Dictionary<string, int> pathsCompressed = new Dictionary<string, int>();
                         JsonNode document = JsonNode.Parse(input);
                         JsonObject itemJObj = document.Root.AsObject();
 
                         DataEncryptionKey encryptionKey = await encryptor.GetEncryptionKeyAsync(encryptionOptions.DataEncryptionKeyId, encryptionOptions.EncryptionAlgorithm);
+
+                        CompressorFactory compressorFactory = encryptionOptions.CompressionOptions.Algorithm != CompressionOptions.CompressionAlgorithm.None ? new CompressorFactory(encryptionOptions.CompressionOptions) : null;
+
+                        bool compressedProperties = false;
 
                         foreach (string pathToEncrypt in encryptionOptions.PathsToEncrypt)
                         {
@@ -119,34 +123,64 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                                 continue;
                             }
 
-                            int cipherTextLength = encryptionKey.GetEncryptByteCount(plainTextLength);
-
-                            byte[] cipherTextWithTypeMarker = arrayPoolManager.Rent(cipherTextLength + 1);
-
-                            cipherTextWithTypeMarker[0] = (byte)typeMarker;
-
-                            int encryptedBytesCount = encryptionKey.EncryptData(
-                                plainText,
-                                plainTextOffset: 0,
-                                plainTextLength,
-                                cipherTextWithTypeMarker,
-                                outputOffset: 1);
-
-                            if (encryptedBytesCount < 0)
+                            if (compressorFactory != null && plainTextLength >= encryptionOptions.CompressionOptions.MinimalCompressedLength)
                             {
-                                throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
-                            }
+                                byte[] compressedText = arrayPoolManager.Rent(plainTextLength);
+                                using MemoryStream stream = new MemoryStream(compressedText);
+                                using Stream compressionStream = compressorFactory.CreateCompressionStream(stream);
+                                await compressionStream.WriteAsync(plainText, 0, plainTextLength);
+                                await compressionStream.FlushAsync();
+                                int compressedLength = (int)stream.Position;
 
-                            itemJObj[propertyName] = JsonValue.Create(cipherTextWithTypeMarker.AsSpan(0, encryptedBytesCount + 1).ToArray());
-                            pathsEncrypted.Add(pathToEncrypt);
+                                int cipherTextLength = encryptionKey.GetEncryptByteCount(compressedLength);
+                                byte[] cipherTextWithTypeMarker = arrayPoolManager.Rent(compressedLength + 1);
+                                cipherTextWithTypeMarker[0] = (byte)typeMarker;
+
+                                int encryptedBytesCount = encryptionKey.EncryptData(compressedText, 0, compressedLength, cipherTextWithTypeMarker, 1);
+
+                                if (encryptedBytesCount < 0)
+                                {
+                                    throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
+                                }
+
+                                itemJObj[propertyName] = JsonValue.Create(cipherTextWithTypeMarker.AsSpan(0, encryptedBytesCount + 1).ToArray());
+
+                                pathsCompressed.Add(propertyName, plainTextLength);
+                                compressedProperties = true;
+                            }
+                            else
+                            {
+                                int cipherTextLength = encryptionKey.GetEncryptByteCount(plainTextLength);
+
+                                byte[] cipherTextWithTypeMarker = arrayPoolManager.Rent(cipherTextLength + 1);
+
+                                cipherTextWithTypeMarker[0] = (byte)typeMarker;
+
+                                int encryptedBytesCount = encryptionKey.EncryptData(
+                                    plainText,
+                                    plainTextOffset: 0,
+                                    plainTextLength,
+                                    cipherTextWithTypeMarker,
+                                    outputOffset: 1);
+
+                                if (encryptedBytesCount < 0)
+                                {
+                                    throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
+                                }
+
+                                itemJObj[propertyName] = JsonValue.Create(cipherTextWithTypeMarker.AsSpan(0, encryptedBytesCount + 1).ToArray());
+                                pathsEncrypted.Add(pathToEncrypt);
+                            }
                         }
 
                         encryptionProperties = new EncryptionProperties(
-                                encryptionFormatVersion: 3,
+                                encryptionFormatVersion: compressedProperties ? 4 : 3,
                                 encryptionOptions.EncryptionAlgorithm,
                                 encryptionOptions.DataEncryptionKeyId,
                                 encryptedData: null,
-                                pathsEncrypted);
+                                pathsEncrypted,
+                                encryptionOptions.CompressionOptions.Algorithm,
+                                compressedProperties ? pathsCompressed : null);
 
                         JsonNode node = System.Text.Json.JsonSerializer.SerializeToNode(encryptionProperties);
 
@@ -154,7 +188,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                         input.Dispose();
 
                         MemoryStream ms = new MemoryStream();
-                        Utf8JsonWriter writer = new Utf8JsonWriter(ms);
+                        using Utf8JsonWriter writer = new Utf8JsonWriter(ms);
                         System.Text.Json.JsonSerializer.Serialize(writer, document);
                         ms.Position = 0;
                         return ms;
@@ -197,7 +231,9 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                                 encryptionOptions.EncryptionAlgorithm,
                                 encryptionOptions.DataEncryptionKeyId,
                                 encryptedData: cipherText,
-                                encryptionOptions.PathsToEncrypt);
+                                encryptionOptions.PathsToEncrypt,
+                                CompressionOptions.CompressionAlgorithm.None,
+                                null);
 
                         itemJObj.Add(Constants.EncryptedInfo, JObject.FromObject(encryptionProperties));
                         input.Dispose();
@@ -242,7 +278,13 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             EncryptionProperties encryptionProperties = encryptionPropertiesJObj.ToObject<EncryptionProperties>();
             DecryptionContext decryptionContext = encryptionProperties.EncryptionAlgorithm switch
             {
-                CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized => await EncryptionProcessor.MdeEncAlgoDecryptObjectAsync(
+                CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized when encryptionProperties.CompressionAlgorithm == CompressionOptions.CompressionAlgorithm.None => await EncryptionProcessor.MdeEncAlgoDecryptObjectAsync(
+                    itemJObj,
+                    encryptor,
+                    encryptionProperties,
+                    diagnosticsContext,
+                    cancellationToken),
+                CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized when encryptionProperties.CompressionAlgorithm != CompressionOptions.CompressionAlgorithm.None => await EncryptionProcessor.MdeEncAlgoDecryptCompressedObjectAsync(
                     itemJObj,
                     encryptor,
                     encryptionProperties,
@@ -350,6 +392,107 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                     propertyName);
 
                 pathsDecrypted.Add(path);
+            }
+
+            DecryptionContext decryptionContext = EncryptionProcessor.CreateDecryptionContext(
+                pathsDecrypted,
+                encryptionProperties.DataEncryptionKeyId);
+
+            document.Remove(Constants.EncryptedInfo);
+            return decryptionContext;
+        }
+
+        private static async Task<DecryptionContext> MdeEncAlgoDecryptCompressedObjectAsync(
+            JObject document,
+            Encryptor encryptor,
+            EncryptionProperties encryptionProperties,
+            CosmosDiagnosticsContext diagnosticsContext,
+            CancellationToken cancellationToken)
+        {
+            _ = diagnosticsContext;
+
+            if (encryptionProperties.EncryptionFormatVersion != 4)
+            {
+                throw new NotSupportedException($"Unknown encryption format version: {encryptionProperties.EncryptionFormatVersion}. Please upgrade your SDK to the latest version.");
+            }
+
+            using ArrayPoolManager arrayPoolManager = new ArrayPoolManager();
+            CompressorFactory compressorFactory = new CompressorFactory(new CompressionOptions() {  Algorithm = encryptionProperties.CompressionAlgorithm });
+
+            DataEncryptionKey encryptionKey = await encryptor.GetEncryptionKeyAsync(encryptionProperties.DataEncryptionKeyId, encryptionProperties.EncryptionAlgorithm, cancellationToken);
+
+            List<string> pathsDecrypted = new List<string>(encryptionProperties.EncryptedPaths.Count());
+            foreach (string path in encryptionProperties.EncryptedPaths)
+            {
+                string propertyName = path.Substring(1);
+                if (!document.TryGetValue(propertyName, out JToken propertyValue))
+                {
+                    continue;
+                }
+
+                byte[] cipherTextWithTypeMarker = propertyValue.ToObject<byte[]>();
+                if (cipherTextWithTypeMarker == null)
+                {
+                    continue;
+                }
+
+                int compressedTextLength = encryptionKey.GetDecryptByteCount(cipherTextWithTypeMarker.Length - 1);
+
+                byte[] compressedText = arrayPoolManager.Rent(compressedTextLength);
+
+                int decryptedCount = EncryptionProcessor.MdeEncAlgoDecryptPropertyAsync(
+                    encryptionKey,
+                    cipherTextWithTypeMarker,
+                    cipherTextOffset: 1,
+                    cipherTextWithTypeMarker.Length - 1,
+                    compressedText);
+
+                EncryptionProcessor.DeserializeAndAddProperty(
+                    (TypeMarker)cipherTextWithTypeMarker[0],
+                    compressedText.AsSpan(0, decryptedCount),
+                    document,
+                    propertyName);
+
+                pathsDecrypted.Add(path);
+            }
+            foreach (KeyValuePair<string, int> compressedPath in encryptionProperties.CompressedEncryptedPaths)
+            {
+                string propertyName = compressedPath.Key.Substring(1);
+                if (!document.TryGetValue(propertyName, out JToken propertyValue))
+                {
+                    continue;
+                }
+
+                byte[] cipherTextWithTypeMarker = propertyValue.ToObject<byte[]>();
+                if (cipherTextWithTypeMarker == null)
+                {
+                    continue;
+                }
+
+                int compressedTextLength = encryptionKey.GetDecryptByteCount(cipherTextWithTypeMarker.Length - 1);
+
+                byte[] compressedText = arrayPoolManager.Rent(compressedTextLength);
+
+                int decryptedCount = EncryptionProcessor.MdeEncAlgoDecryptPropertyAsync(
+                    encryptionKey,
+                    cipherTextWithTypeMarker,
+                    cipherTextOffset: 1,
+                    cipherTextWithTypeMarker.Length - 1,
+                    compressedText);
+
+                byte[] plainText = arrayPoolManager.Rent(compressedPath.Value);
+                using MemoryStream ms = new MemoryStream(compressedText, 1, compressedTextLength - 1);
+                using Stream decompressionStream = compressorFactory.CreateDecompressionStream(ms);
+                await decompressionStream.ReadAsync(plainText, 0, compressedPath.Value);
+                await decompressionStream.FlushAsync();
+
+                EncryptionProcessor.DeserializeAndAddProperty(
+                    (TypeMarker)cipherTextWithTypeMarker[0],
+                    plainText.AsSpan(0, compressedPath.Value),
+                    document,
+                    propertyName);
+
+                pathsDecrypted.Add(compressedPath.Key);
             }
 
             DecryptionContext decryptionContext = EncryptionProcessor.CreateDecryptionContext(
