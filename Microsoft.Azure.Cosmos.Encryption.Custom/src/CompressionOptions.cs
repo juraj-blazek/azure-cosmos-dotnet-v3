@@ -1,4 +1,8 @@
-﻿namespace Microsoft.Azure.Cosmos.Encryption.Custom
+﻿// ------------------------------------------------------------
+// Copyright (c) Microsoft Corporation.  All rights reserved.
+// ------------------------------------------------------------
+
+namespace Microsoft.Azure.Cosmos.Encryption.Custom
 {
     using System;
     using System.Collections.Generic;
@@ -12,6 +16,9 @@
             None = 0,
             GZip = 1,
             Deflate = 2,
+#if NET6_0_OR_GREATER
+            Brotli = 3,
+#endif
         }
 
         public CompressionAlgorithm Algorithm { get; set; } = CompressionAlgorithm.None;

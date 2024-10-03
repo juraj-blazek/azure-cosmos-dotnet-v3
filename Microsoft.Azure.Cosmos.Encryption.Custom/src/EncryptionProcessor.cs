@@ -75,7 +75,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                     throw new InvalidOperationException($"Invalid path {path ?? string.Empty}, {nameof(encryptionOptions.PathsToEncrypt)}");
                 }
 
+#if NET6_0_OR_GREATER
+                if (string.Equals(path[1..], "id"))
+#else
                 if (string.Equals(path.Substring(1), "id"))
+#endif
                 {
                     throw new InvalidOperationException($"{nameof(encryptionOptions.PathsToEncrypt)} includes a invalid path: '{path}'.");
                 }
@@ -105,7 +109,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
 
                         foreach (string pathToEncrypt in encryptionOptions.PathsToEncrypt)
                         {
+#if NET6_0_OR_GREATER
+                            string propertyName = pathToEncrypt[1..];
+#else
                             string propertyName = pathToEncrypt.Substring(1);
+#endif
                             if (!itemJObj.TryGetPropertyValue(propertyName, out JsonNode propertyValue))
                             {
                                 continue;
@@ -362,7 +370,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             List<string> pathsDecrypted = new List<string>(encryptionProperties.EncryptedPaths.Count());
             foreach (string path in encryptionProperties.EncryptedPaths)
             {
+#if NET6_0_OR_GREATER
+                string propertyName = path[1..];
+#else
                 string propertyName = path.Substring(1);
+#endif
                 if (!document.TryGetValue(propertyName, out JToken propertyValue))
                 {
                     continue;
@@ -424,7 +436,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             List<string> pathsDecrypted = new List<string>(encryptionProperties.EncryptedPaths.Count());
             foreach (string path in encryptionProperties.EncryptedPaths)
             {
+#if NET6_0_OR_GREATER
+                string propertyName = path[1..];
+#else
                 string propertyName = path.Substring(1);
+#endif
                 if (!document.TryGetValue(propertyName, out JToken propertyValue))
                 {
                     continue;
@@ -457,7 +473,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             }
             foreach (KeyValuePair<string, int> compressedPath in encryptionProperties.CompressedEncryptedPaths)
             {
+#if NET6_0_OR_GREATER
+                string propertyName = compressedPath.Key[1..];
+#else
                 string propertyName = compressedPath.Key.Substring(1);
+#endif
                 if (!document.TryGetValue(propertyName, out JToken propertyValue))
                 {
                     continue;

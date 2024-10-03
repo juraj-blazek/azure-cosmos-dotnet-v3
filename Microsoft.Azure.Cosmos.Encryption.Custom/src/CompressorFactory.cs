@@ -24,6 +24,12 @@
                     this.CreateCompressionStream = new Func<Stream, Stream>(input => new DeflateStream(input, compressionOptions.CompressionLevel));
                     this.CreateDecompressionStream = new Func<Stream, Stream>(input => new DeflateStream(input, CompressionMode.Decompress));
                     break;
+#if NET6_0_OR_GREATER
+                case CompressionOptions.CompressionAlgorithm.Brotli:
+                    this.CreateCompressionStream = new Func<Stream, Stream>(input => new BrotliStream(input, compressionOptions.CompressionLevel));
+                    this.CreateDecompressionStream = new Func<Stream, Stream>(input => new BrotliStream(input, CompressionMode.Decompress));
+                    break;
+#endif
             }
         }
     }

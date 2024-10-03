@@ -119,7 +119,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             }
 
             this.pos = this.length;
+#if NET6_0_OR_GREATER
+            return new string(this.chars[this.pos..this.length].Span);
+#else
             return new string(this.chars.Slice(this.pos, this.length - this.pos).ToArray());
+#endif
         }
 
         public override string ReadLine()
@@ -135,7 +139,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                 char ch = this.chars.Span[i];
                 if (ch == '\r' || ch == '\n')
                 {
+#if NET6_0_OR_GREATER
+                    string result = new string(this.chars[this.pos..i].Span);
+#else
                     string result = new string(this.chars.Slice(this.pos, i - this.pos).ToArray());
+#endif
                     this.pos = i + 1;
                     if (ch == '\r' && this.pos < this.length && this.chars.Span[this.pos] == '\n')
                     {
@@ -150,7 +158,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
 
             if (i > this.pos)
             {
+#if NET6_0_OR_GREATER
+                string result = new string(this.chars[this.pos..i].Span);
+#else
                 string result = new string(this.chars.Slice(this.pos, i - this.pos).ToArray());
+#endif
                 this.pos = i;
                 return result;
             }

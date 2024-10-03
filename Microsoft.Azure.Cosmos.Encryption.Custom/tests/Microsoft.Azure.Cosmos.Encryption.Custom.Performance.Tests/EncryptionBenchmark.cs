@@ -27,9 +27,11 @@
         public int DocumentSizeInKb { get; set; }
 
         [Params(CompressionLevel.Optimal, CompressionLevel.Fastest)]
+        //[Params(CompressionLevel.NoCompression)]
         public CompressionLevel CompressionLevel { get; set; }
 
-        [Params(CompressionOptions.CompressionAlgorithm.None, CompressionOptions.CompressionAlgorithm.Deflate, CompressionOptions.CompressionAlgorithm.GZip)]
+        [Params(CompressionOptions.CompressionAlgorithm.None, CompressionOptions.CompressionAlgorithm.Deflate, CompressionOptions.CompressionAlgorithm.GZip, CompressionOptions.CompressionAlgorithm.Brotli)]
+        //[Params(CompressionOptions.CompressionAlgorithm.None)]
         public CompressionOptions.CompressionAlgorithm CompressionAlgorithm { get; set; } = CompressionOptions.CompressionAlgorithm.None;
 
         [GlobalSetup]
