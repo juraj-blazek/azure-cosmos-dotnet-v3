@@ -13,6 +13,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
     using System.Text;
     using System.Text.Json;
     using System.Text.Json.Nodes;
+    using System.Text.Json.Serialization.Metadata;
     using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Data.Encryption.Cryptography.Serializers;
@@ -37,7 +38,15 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             DateParseHandling = DateParseHandling.None,
         };
 
+        private static readonly JsonSerializerOptions JsonSerializerOptions;
+
         internal static readonly CosmosJsonDotNetSerializer BaseSerializer = new CosmosJsonDotNetSerializer(JsonSerializerSettings);
+
+        static EncryptionProcessor()
+        {
+            JsonSerializerOptions = new JsonSerializerOptions();
+            JsonSerializerOptions.Converters.Add(new JsonEncryptedValueConverter());
+        }
 
         /// <remarks>
         /// If there isn't any PathsToEncrypt, input stream will be returned without any modification.
@@ -137,7 +146,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                                 throw new InvalidOperationException($"{nameof(Encryptor)} returned null cipherText from {nameof(EncryptAsync)}.");
                             }
 
-                            itemJObj[propertyName] = JsonValue.Create(cipherTextWithTypeMarker.AsSpan(0, encryptedBytesCount + 1).ToArray());
+                            itemJObj[propertyName] = JsonValue.Create(new JsonEncryptedValue(cipherTextWithTypeMarker,0, encryptedBytesCount + 1));
                             pathsEncrypted.Add(pathToEncrypt);
                         }
 
@@ -155,7 +164,8 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
 
                         MemoryStream ms = new MemoryStream();
                         Utf8JsonWriter writer = new Utf8JsonWriter(ms);
-                        System.Text.Json.JsonSerializer.Serialize(writer, document);
+
+                        System.Text.Json.JsonSerializer.Serialize(writer, document, JsonSerializerOptions);
                         ms.Position = 0;
                         return ms;
                     }
