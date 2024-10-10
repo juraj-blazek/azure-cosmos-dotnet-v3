@@ -6,7 +6,9 @@
 namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
 {
     using System;
+    using System.Buffers;
     using System.Diagnostics;
+    using System.Text;
     using System.Text.Json;
     using System.Text.Json.Nodes;
     using Microsoft.Data.Encryption.Cryptography.Serializers;
@@ -65,11 +67,29 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
                     (buffer, length) = SerializeString(propertyValue.GetValue<string>());
                     return (TypeMarker.String, buffer, length);
                 case JsonValueKind.Array:
-                    (buffer, length) = SerializeString(propertyValue.ToJsonString());
-                    return (TypeMarker.Array, buffer, length);
+                    {
+                        using RentArrayBufferWriter bufferWriter = new ();
+                        using Utf8JsonWriter writer = new (bufferWriter);
+                        propertyValue.WriteTo(writer);
+                        writer.Flush();
+                        int writtenBytes = bufferWriter.BytesWritten;
+                        byte[] rented = arrayPoolManager.Rent(writtenBytes);
+                        bufferWriter.WrittenSpan.CopyTo(rented);
+                        return (TypeMarker.Array, rented, writtenBytes);
+                    }
+
                 case JsonValueKind.Object:
-                    (buffer, length) = SerializeString(propertyValue.ToJsonString());
-                    return (TypeMarker.Object, buffer, length);
+                    {
+                        using RentArrayBufferWriter bufferWriter = new ();
+                        using Utf8JsonWriter writer = new (bufferWriter);
+                        propertyValue.WriteTo(writer);
+                        writer.Flush();
+                        int writtenBytes = bufferWriter.BytesWritten;
+                        byte[] rented = arrayPoolManager.Rent(writtenBytes);
+                        bufferWriter.WrittenSpan.CopyTo(rented);
+                        return (TypeMarker.Object, rented, writtenBytes);
+                    }
+
                 default:
                     throw new InvalidOperationException($" Invalid or Unsupported Data Type Passed : {propertyValue.GetValueKind()}");
             }
