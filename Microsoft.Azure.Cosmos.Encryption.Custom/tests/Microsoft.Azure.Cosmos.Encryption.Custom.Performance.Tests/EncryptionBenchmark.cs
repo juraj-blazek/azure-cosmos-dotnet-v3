@@ -25,7 +25,7 @@
         [Params(1, 10, 100)]
         public int DocumentSizeInKb { get; set; }
 
-        [Params(/*JsonProcessor.Newtonsoft,*/ JsonProcessor.SystemTextJson)]
+        [Params(JsonProcessor.Newtonsoft, JsonProcessor.SystemTextJson)]
         public JsonProcessor JsonProcessor { get; set; }
 
         [GlobalSetup]
