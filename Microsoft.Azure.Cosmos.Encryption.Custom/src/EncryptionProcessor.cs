@@ -161,14 +161,15 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             Debug.Assert(encryptor != null);
             Debug.Assert(diagnosticsContext != null);
 
-            JsonNode document = await JsonNode.ParseAsync(input, cancellationToken: cancellationToken);
+            EncryptionPropertiesWrap encryptionPropertiesWrap = await System.Text.Json.JsonSerializer.DeserializeAsync<EncryptionPropertiesWrap>(input, cancellationToken: cancellationToken);
+            input.Position = 0;
 
-            (JsonNode decryptedDocument, DecryptionContext context) = await DecryptAsync(document, encryptor, diagnosticsContext, cancellationToken);
-            if (context == null)
+            if (encryptionPropertiesWrap?.EncryptionProperties?.EncryptedPaths?.Any() != true)
             {
-                input.Position = 0;
                 return (input, null);
             }
+
+            (JsonNode decryptedDocument, DecryptionContext context) = await DecryptInternalAsync(encryptor, diagnosticsContext, input, encryptionPropertiesWrap.EncryptionProperties, cancellationToken);
 
             await input.DisposeAsync();
 
@@ -248,6 +249,21 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                 _ => throw new NotSupportedException($"Encryption Algorithm : {encryptionProperties.EncryptionAlgorithm} is not supported."),
             };
             return decryptionContext;
+        }
+
+        private static async Task<(JsonNode, DecryptionContext)> DecryptInternalAsync(Encryptor encryptor, CosmosDiagnosticsContext diagnosticsContext, Stream stream, EncryptionProperties encryptionProperties, CancellationToken cancellationToken)
+        {
+            (JsonNode document, DecryptionContext decryptionContext) = encryptionProperties.EncryptionAlgorithm switch
+            {
+                CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized => await MdeEncryptionProcessor.DecryptObjectAsync(
+                    stream,
+                    encryptor,
+                    encryptionProperties,
+                    diagnosticsContext,
+                    cancellationToken),
+                _ => throw new NotSupportedException($"Encryption Algorithm : {encryptionProperties.EncryptionAlgorithm} is not supported."),
+            };
+            return (document, decryptionContext);
         }
 #endif
 

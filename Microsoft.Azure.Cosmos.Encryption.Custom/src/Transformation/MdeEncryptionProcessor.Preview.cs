@@ -59,6 +59,16 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
         {
             return await this.JsonNodeEncryptionProcessor.DecryptObjectAsync(document, encryptor, encryptionProperties, diagnosticsContext, cancellationToken);
         }
+
+        internal async Task<(JsonNode, DecryptionContext)> DecryptObjectAsync(
+            Stream stream,
+            Encryptor encryptor,
+            EncryptionProperties encryptionProperties,
+            CosmosDiagnosticsContext diagnosticsContext,
+            CancellationToken cancellationToken)
+        {
+            return await this.JsonNodeEncryptionProcessor.DecryptObjectAsync(stream, encryptor, encryptionProperties, diagnosticsContext, cancellationToken);
+        }
 #endif
     }
 }
