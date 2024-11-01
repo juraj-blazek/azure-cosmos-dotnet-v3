@@ -8,19 +8,16 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
 {
     using System;
     using System.IO;
-#if NET8_0_OR_GREATER
-    using System.Text.Json.Nodes;
-#endif
     using System.Threading;
     using System.Threading.Tasks;
     using Newtonsoft.Json.Linq;
 
     internal class MdeEncryptionProcessor
     {
-        internal MdeJObjectEncryptionProcessor JObjectEncryptionProcessor { get; set; } = new MdeJObjectEncryptionProcessor();
+        private readonly MdeJObjectEncryptionProcessor jObjectEncryptionProcessor = new MdeJObjectEncryptionProcessor();
 
 #if NET8_0_OR_GREATER
-        internal StreamProcessor StreamProcessor { get; set; } = new StreamProcessor();
+        private readonly StreamProcessor streamProcessor = new StreamProcessor();
 #endif
 
         public async Task<Stream> EncryptAsync(
@@ -33,10 +30,10 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
             switch (encryptionOptions.JsonProcessor)
             {
                 case JsonProcessor.Newtonsoft:
-                    return await this.JObjectEncryptionProcessor.EncryptAsync(input, encryptor, encryptionOptions, token);
+                    return await this.jObjectEncryptionProcessor.EncryptAsync(input, encryptor, encryptionOptions, token);
                 case JsonProcessor.Stream:
                     MemoryStream ms = new ();
-                    await this.StreamProcessor.EncryptStreamAsync(input, ms, encryptor, encryptionOptions, token);
+                    await this.streamProcessor.EncryptStreamAsync(input, ms, encryptor, encryptionOptions, token);
                     return ms;
 
                 default:
@@ -45,7 +42,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
 #else
             return encryptionOptions.JsonProcessor switch
             {
-                JsonProcessor.Newtonsoft => await this.JObjectEncryptionProcessor.EncryptAsync(input, encryptor, encryptionOptions, token),
+                JsonProcessor.Newtonsoft => await this.jObjectEncryptionProcessor.EncryptAsync(input, encryptor, encryptionOptions, token),
                 _ => throw new InvalidOperationException("Unsupported JsonProcessor"),
             };
 #endif
@@ -58,7 +55,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
             CosmosDiagnosticsContext diagnosticsContext,
             CancellationToken cancellationToken)
         {
-            return await this.JObjectEncryptionProcessor.DecryptObjectAsync(document, encryptor, encryptionProperties, diagnosticsContext, cancellationToken);
+            return await this.jObjectEncryptionProcessor.DecryptObjectAsync(document, encryptor, encryptionProperties, diagnosticsContext, cancellationToken);
         }
     }
 }

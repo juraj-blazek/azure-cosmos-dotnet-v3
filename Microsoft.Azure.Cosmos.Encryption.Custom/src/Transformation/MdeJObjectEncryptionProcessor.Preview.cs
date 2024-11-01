@@ -16,9 +16,9 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
 
     internal class MdeJObjectEncryptionProcessor
     {
-        internal JObjectSqlSerializer Serializer { get; set; } = new JObjectSqlSerializer();
+        private readonly JObjectSqlSerializer serializer = new JObjectSqlSerializer();
 
-        internal MdeEncryptor Encryptor { get; set; } = new MdeEncryptor();
+        private readonly MdeEncryptor encryptor = new MdeEncryptor();
 
         public async Task<Stream> EncryptAsync(
             Stream input,
@@ -78,7 +78,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
                 }
 
                 byte[] processedBytes = null;
-                (typeMarker, processedBytes, int processedBytesLength) = this.Serializer.Serialize(propertyValue, arrayPoolManager);
+                (typeMarker, processedBytes, int processedBytesLength) = this.serializer.Serialize(propertyValue, arrayPoolManager);
 
                 if (processedBytes == null)
                 {
@@ -94,7 +94,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
                 }
 #endif
 
-                byte[] encryptedBytes = this.Encryptor.Encrypt(encryptionKey, typeMarker, processedBytes, processedBytesLength);
+                byte[] encryptedBytes = this.encryptor.Encrypt(encryptionKey, typeMarker, processedBytes, processedBytesLength);
 
                 input[propertyName] = encryptedBytes;
 
@@ -176,7 +176,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
                     continue;
                 }
 
-                (byte[] bytes, int processedBytes) = this.Encryptor.Decrypt(encryptionKey, cipherTextWithTypeMarker, cipherTextWithTypeMarker.Length, arrayPoolManager);
+                (byte[] bytes, int processedBytes) = this.encryptor.Decrypt(encryptionKey, cipherTextWithTypeMarker, cipherTextWithTypeMarker.Length, arrayPoolManager);
 
 #if NET8_0_OR_GREATER
                 if (decompressor != null)
@@ -191,7 +191,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
                 }
 #endif
 
-                this.Serializer.DeserializeAndAddProperty(
+                this.serializer.DeserializeAndAddProperty(
                     (TypeMarker)cipherTextWithTypeMarker[0],
                     bytes.AsSpan(0, processedBytes),
                     document,

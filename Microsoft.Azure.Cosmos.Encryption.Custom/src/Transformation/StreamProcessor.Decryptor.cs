@@ -27,7 +27,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
 
         internal static int InitialBufferSize { get; set; } = 16384;
 
-        internal MdeEncryptor Encryptor { get; set; } = new MdeEncryptor();
+        private readonly MdeEncryptor encryptor = new MdeEncryptor();
 
         internal async Task<DecryptionContext> DecryptStreamAsync(
             Stream inputStream,
@@ -211,7 +211,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
                     throw new InvalidOperationException($"Base64 decoding failed: {status}");
                 }
 
-                (byte[] bytes, int processedBytes) = this.Encryptor.Decrypt(encryptionKey, cipherTextWithTypeMarker, cipherTextLength, arrayPoolManager);
+                (byte[] bytes, int processedBytes) = this.encryptor.Decrypt(encryptionKey, cipherTextWithTypeMarker, cipherTextLength, arrayPoolManager);
 
                 if (containsCompressed && properties.CompressedEncryptedPaths?.TryGetValue(decryptPropertyName, out int decompressedSize) == true)
                 {
