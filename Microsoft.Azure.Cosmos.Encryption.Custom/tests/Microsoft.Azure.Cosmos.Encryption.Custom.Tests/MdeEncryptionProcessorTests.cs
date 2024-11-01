@@ -418,7 +418,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
         }
 #endif
 
-        private static EncryptionOptions CreateEncryptionOptions(JsonProcessor processor, CompressionOptions.CompressionAlgorithm compressionAlgorithm, CompressionLevel compressionLevel)
+        private static EncryptionOptions CreateEncryptionOptions(JsonProcessor processor, string compressionAlgorithm, CompressionLevel compressionLevel)
         {
             return new EncryptionOptions()
             {

@@ -33,7 +33,7 @@
         public int DocumentSizeInKb { get; set; }
 
         [Params(CompressionOptions.CompressionAlgorithm.None, CompressionOptions.CompressionAlgorithm.Brotli)]
-        public CompressionOptions.CompressionAlgorithm CompressionAlgorithm { get; set; }
+        public string? CompressionAlgorithm { get; set; }
 
 #if ENCRYPTION_CUSTOM_PREVIEW && NET8_0_OR_GREATER
         [Params(JsonProcessor.Newtonsoft, JsonProcessor.Stream)]

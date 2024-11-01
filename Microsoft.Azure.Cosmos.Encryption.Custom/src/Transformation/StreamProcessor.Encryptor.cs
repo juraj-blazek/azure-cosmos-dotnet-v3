@@ -7,6 +7,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
 {
     using System;
     using System.Collections.Generic;
+    using System.Globalization;
     using System.IO;
     using System.Text;
     using System.Text.Json;
@@ -287,11 +288,11 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.Transformation
 
         private static (TypeMarker typeMarker, byte[] buffer, int length) SerializeNumber(ReadOnlySpan<byte> utf8bytes, ArrayPoolManager arrayPoolManager)
         {
-            if (long.TryParse(utf8bytes, out long longValue))
+            if (long.TryParse(utf8bytes, CultureInfo.InvariantCulture, out long longValue))
             {
                 return Serialize(longValue, arrayPoolManager);
             }
-            else if (double.TryParse(utf8bytes, out double doubleValue))
+            else if (double.TryParse(utf8bytes, CultureInfo.InvariantCulture, out double doubleValue))
             {
                 return Serialize(doubleValue, arrayPoolManager);
             }

@@ -13,7 +13,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
         public const string EncryptionDekId = "_en";
         public const string EncryptionFormatVersion = "_ef";
         public const string EncryptedPaths = "_ep";
-        public const string CompressionAlgorithm = "_ce";
+        public const string CompressionAlgorithm = "_ca";
         public const string CompressedEncryptedPaths = "_cp";
         public const int DekPropertiesDefaultTTLInMinutes = 120;
     }

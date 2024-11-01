@@ -49,12 +49,18 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
         internal static Stream ToStream<T>(T input)
         {
             string s = JsonConvert.SerializeObject(input);
-            return new MemoryStream(Encoding.UTF8.GetBytes(s));
+            MemoryStream ms = new(Encoding.UTF8.GetBytes(s))
+            {
+                Position = 0
+            };
+
+            return ms;
         }
 
-        internal static T FromStream<T>(Stream stream)
+        internal static T FromStream<T>(Stream stream, bool leaveOpen = false)
         {
-            using (StreamReader sr = new(stream))
+            stream.Position = 0;
+            using (StreamReader sr = new(stream, leaveOpen: leaveOpen))
             using (JsonReader reader = new JsonTextReader(sr))
             {
                 JsonSerializer serializer = new();
@@ -64,7 +70,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
 
         internal class TestDoc
         {
-            public static List<string> PathsToEncrypt { get; } = new List<string>() { "/SensitiveStr", "/SensitiveInt", "/SensitiveArr", "/SensitiveDict" };
+            public static List<string> PathsToEncrypt { get; } = new List<string>() { "/SensitiveStr", "/SensitiveInt", "/SensitiveArr", "/SensitiveDict", "/SensitiveBool" };
 
             [JsonProperty("id")]
             public string Id { get; set; }
@@ -81,6 +87,8 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
 
             public Dictionary<string, string> SensitiveDict { get; set; }
 
+            public bool SensitiveBool { get; set; }
+
             public TestDoc()
             {
             }
@@ -94,7 +102,8 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                        && this.SensitiveInt == doc.SensitiveInt
                        && this.SensitiveStr == doc.SensitiveStr
                        && this.SensitiveArr?.Equals(doc.SensitiveArr) == true
-                       && this.SensitiveDict?.Equals(doc.SensitiveDict) == true;
+                       && this.SensitiveDict?.Equals(doc.SensitiveDict) == true
+                       && this.SensitiveBool == doc.SensitiveBool;
             }
 
             public override int GetHashCode()
@@ -107,6 +116,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                 hashCode = (hashCode * -1521134295) + EqualityComparer<int>.Default.GetHashCode(this.SensitiveInt);
                 hashCode = (hashCode * -1521134295) + EqualityComparer<string[]>.Default.GetHashCode(this.SensitiveArr);
                 hashCode = (hashCode * -1521134295) + EqualityComparer<Dictionary<string, string>>.Default.GetHashCode(this.SensitiveDict);
+                hashCode = (hashCode * -1521134295) + EqualityComparer<bool>.Default.GetHashCode(this.SensitiveBool);
                 return hashCode;
             }
 
@@ -131,7 +141,8 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                         { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() },
                         { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() },
                         { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() },
-                    }
+                    },
+                    SensitiveBool = new Random().Next(2) != 0,
                 };
             }
 

@@ -15,25 +15,25 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
         /// Supported compression algorithms
         /// </summary>
         /// <remarks>Compression is only supported with .NET8.0+.</remarks>
-        public enum CompressionAlgorithm
+        public static class CompressionAlgorithm
         {
             /// <summary>
             /// No compression
             /// </summary>
-            None = 0,
+            public const string None = "None";
 #if NET8_0_OR_GREATER
 
             /// <summary>
             /// Brotli compression
             /// </summary>
-            Brotli = 1,
+            public const string Brotli = "Brotli";
 #endif
         }
 
         /// <summary>
         /// Gets or sets compression algorithm.
         /// </summary>
-        public CompressionAlgorithm Algorithm { get; set; } = CompressionAlgorithm.None;
+        public string Algorithm { get; set; } = CompressionAlgorithm.None;
 
         /// <summary>
         /// Gets or sets compression level.
