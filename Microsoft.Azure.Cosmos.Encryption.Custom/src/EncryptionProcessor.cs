@@ -90,11 +90,6 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                 return;
             }
 
-            if (encryptionOptions.EncryptionAlgorithm != CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized)
-            {
-                throw new NotSupportedException($"Streaming mode is only allowed for {nameof(CosmosEncryptionAlgorithm.MdeAeadAes256CbcHmac256Randomized)}");
-            }
-
             if (encryptionOptions.JsonProcessor != JsonProcessor.Stream)
             {
                 throw new NotSupportedException($"Streaming mode is only allowed for {nameof(JsonProcessor.Stream)}");

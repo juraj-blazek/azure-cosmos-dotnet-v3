@@ -121,21 +121,15 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                 JsonProcessor = jsonProcessor,
             };
 
-            try
-            {
+            InvalidOperationException ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(async () =>
                 await EncryptionProcessor.EncryptAsync(
                     testDoc.ToStream(),
                     mockEncryptor.Object,
                     encryptionOptionsWithDuplicatePathToEncrypt,
                     new CosmosDiagnosticsContext(),
-                    CancellationToken.None);
+                    CancellationToken.None));
 
-                Assert.Fail("Duplicate paths in PathToEncrypt didn't result in exception.");
-            }
-            catch (InvalidOperationException ex)
-            {
-                Assert.AreEqual("Duplicate paths in PathsToEncrypt passed via EncryptionOptions.", ex.Message);
-            }
+            Assert.AreEqual("Duplicate paths in PathsToEncrypt.", ex.Message);
         }
 
         [TestMethod]

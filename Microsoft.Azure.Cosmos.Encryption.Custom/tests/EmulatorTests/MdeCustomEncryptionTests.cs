@@ -858,7 +858,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.EmulatorTests
             }
             catch (InvalidOperationException ex)
             {
-                Assert.AreEqual("PathsToEncrypt includes a invalid path: '/id'.", ex.Message);
+                Assert.AreEqual("Invalid path '/id' in PathsToEncrypt.", ex.Message);
             }
 
             try
