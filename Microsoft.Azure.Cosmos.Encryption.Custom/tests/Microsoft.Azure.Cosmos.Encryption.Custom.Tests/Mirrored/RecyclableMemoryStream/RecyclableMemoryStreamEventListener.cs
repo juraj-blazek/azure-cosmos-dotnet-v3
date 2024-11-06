@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-namespace Microsoft.Azure.Cosmos.Encryption.Tests
+namespace Microsoft.Azure.Cosmos.Encryption.Tests.Mirrored.RecyclableMemoryStream
 {
     using System.Diagnostics.Tracing;
     using System.Threading;

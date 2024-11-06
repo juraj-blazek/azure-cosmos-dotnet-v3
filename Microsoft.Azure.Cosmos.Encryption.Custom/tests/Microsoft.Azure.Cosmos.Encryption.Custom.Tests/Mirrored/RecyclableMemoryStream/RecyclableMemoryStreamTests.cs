@@ -20,7 +20,7 @@
 // THE SOFTWARE.
 // ---------------------------------------------------------------------
 
-namespace Microsoft.Azure.Cosmos.Encryption.Tests
+namespace Microsoft.Azure.Cosmos.Encryption.Tests.Mirrored.RecyclableMemoryStream
 {
     using System;
     using System.Buffers;
@@ -534,7 +534,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
             Assert.IsFalse(stream.TryGetBuffer(out ArraySegment<byte> seg));
             Assert.AreEqual(0, seg.Offset);
             Assert.AreEqual(0, seg.Count);
-            Assert.IsNull(seg.Array);
+            Assert.AreEqual(0, seg.Array.Length);
 
             //Non-exception path. Length is too long. No exception.
             byte[] buffer = new byte[RecyclableMemoryStreamManager.MaxArrayLength];
@@ -2633,6 +2633,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
         }
 
         [TestMethod]
+        [DoNotParallelize]
         public void FinalizedStreamTriggersEvent()
         {
             bool handlerTriggered = false;
@@ -2648,7 +2649,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
                 handlerTriggered = true;
             };
 
-            //mgr.StreamDisposed += (obj, args) => Assert.IsTrue(args.Lifetime >= TimeSpan.Zero);
+            mgr.StreamDisposed += (obj, args) => Assert.IsTrue(args.Lifetime >= TimeSpan.Zero);
 
             CreateDeadStream(mgr, expectedGuid, "Tag");
             Thread.Sleep(100);
@@ -3216,6 +3217,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
         [DataRow(true, true)]
         [DataRow(false, true)]
         [TestMethod]
+        [DoNotParallelize]
         public void CopyToAsyncChangesSourcePosition(bool fileStreamTarget, bool largeBuffer)
         {
             using Stream targetStream = fileStreamTarget ? File.OpenWrite(Path.GetRandomFileName()) : new MemoryStream();
@@ -4061,6 +4063,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
 
         [TestMethod]
         [Timeout(10000)]
+        [DoNotParallelize]
         public void TryGetBuffer_InfiniteLoop_Issue344()
         {
             // see https://github.com/microsoft/Microsoft.IO.RecyclableMemoryStream/issues/344
@@ -4106,13 +4109,13 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
             stream.Write(buffer, 0, buffer.Length);
 
             Assert.AreEqual(0, memMgr.LargePoolFreeSize);
-            Assert.AreEqual(memMgr.OptionsValue.LargeBufferMultiple * (1 + 2 + 3), memMgr.LargePoolInUseSize);
+            Assert.AreEqual(memMgr.OptionsValue.LargeBufferMultiple * (1 + 2 + 4), memMgr.LargePoolInUseSize);
             Assert.AreEqual(0, memMgr.SmallPoolFreeSize);
             Assert.AreEqual(memMgr.OptionsValue.LargeBufferMultiple, memMgr.SmallPoolInUseSize);
 
             stream.Dispose();
 
-            Assert.AreEqual(memMgr.OptionsValue.LargeBufferMultiple * (1 + 2 + 3), memMgr.LargePoolFreeSize);
+            Assert.AreEqual(memMgr.OptionsValue.LargeBufferMultiple * (1 + 2 + 4), memMgr.LargePoolFreeSize);
             Assert.AreEqual(0, memMgr.LargePoolInUseSize);
             Assert.AreEqual(memMgr.OptionsValue.LargeBufferMultiple, memMgr.SmallPoolFreeSize);
             Assert.AreEqual(0, memMgr.SmallPoolInUseSize);
@@ -4126,6 +4129,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests
     }
 
     [TestClass]
+    [DoNotParallelize]
     public sealed class RecyclableMemoryStreamTestsWithZeroOutBuffer : BaseRecyclableMemoryStreamTests
     {
         protected override bool AggressiveBufferRelease => false;
