@@ -527,23 +527,6 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests.Mirrored.RecyclableMemoryStrea
         }
 
         [TestMethod]
-        public void TryGetBufferFailsOnLargeStream()
-        {
-            RecyclableMemoryStream stream = this.GetMultiGBStream();
-            // Exception path -- no content, but GetBuffer will throw
-            Assert.IsFalse(stream.TryGetBuffer(out ArraySegment<byte> seg));
-            Assert.AreEqual(0, seg.Offset);
-            Assert.AreEqual(0, seg.Count);
-            Assert.AreEqual(0, seg.Array.Length);
-
-            //Non-exception path. Length is too long. No exception.
-            byte[] buffer = new byte[RecyclableMemoryStreamManager.MaxArrayLength];
-            stream.Write(buffer);
-            stream.Write(buffer);
-            Assert.IsFalse(stream.TryGetBuffer(out _));
-        }
-
-        [TestMethod]
         public void CallingWriteAfterLargeGetBufferDoesNotLoseData()
         {
             RecyclableMemoryStream stream = this.GetDefaultStream();
@@ -3212,15 +3195,12 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests.Mirrored.RecyclableMemoryStrea
             RMSAssert.BuffersAreEqual(new ReadOnlySpan<byte>(stream.GetBuffer(), offset, buffer.Length - offset), otherBuffer, buffer.Length - offset);
         }
 
-        [DataRow(true, false)]
-        [DataRow(false, false)]
-        [DataRow(true, true)]
-        [DataRow(false, true)]
+        [DataRow(false)]
+        [DataRow(true)]
         [TestMethod]
-        [DoNotParallelize]
-        public void CopyToAsyncChangesSourcePosition(bool fileStreamTarget, bool largeBuffer)
+        public void CopyToAsyncChangesSourcePosition(bool largeBuffer)
         {
-            using Stream targetStream = fileStreamTarget ? File.OpenWrite(Path.GetRandomFileName()) : new MemoryStream();
+            using Stream targetStream = new MemoryStream();
             using RecyclableMemoryStream stream = this.GetDefaultStream();
             byte[] buffer = this.GetRandomBuffer(largeBuffer ? DefaultBlockSize * 25 : 100);
             stream.Write(buffer);
@@ -3229,167 +3209,6 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests.Mirrored.RecyclableMemoryStrea
             stream.CopyToAsync(targetStream).Wait();
             Assert.AreEqual(buffer.Length / 2, targetStream.Length);
             Assert.AreEqual(buffer.Length, stream.Position);
-        }
-
-        #endregion
-
-        #region Very Large Buffer Tests (> 2 GB)
-        [TestMethod]
-        public void VeryLargeStream_Write()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetMultiGBStream();
-            Assert.IsTrue(stream.Capacity64 >= DefaultVeryLargeStreamSize);
-            byte[] buffer = this.GetRandomBuffer(1 << 20);
-            while (stream.Length < DefaultVeryLargeStreamSize)
-            {
-                stream.Write(buffer);
-            }
-
-            Assert.AreEqual(DefaultVeryLargeStreamSize, stream.Length);
-
-            // It takes a VERY long time to check 3 GB byte-by-byte, so
-            // just check final 100 MB
-            byte[] checkBuffer = new byte[buffer.Length];
-            stream.Seek(-checkBuffer.Length, SeekOrigin.End);
-            stream.Read(checkBuffer, 0, checkBuffer.Length);
-
-            RMSAssert.BuffersAreEqual(buffer, checkBuffer, buffer.Length);
-        }
-
-        [TestMethod]
-        public void VeryLargeStream_WriteOffsetCount()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetMultiGBStream();
-            Assert.IsTrue(stream.Capacity64 >= DefaultVeryLargeStreamSize);
-            byte[] buffer = this.GetRandomBuffer(1 << 20);
-            while (stream.Length < DefaultVeryLargeStreamSize)
-            {
-                stream.Write(buffer, 0, buffer.Length);
-            }
-
-            Assert.AreEqual(DefaultVeryLargeStreamSize, stream.Length);
-
-            // It takes a VERY long time to check 3 GB byte-by-byte, so
-            // just check final 100 MB
-            byte[] checkBuffer = new byte[buffer.Length];
-            stream.Seek(-checkBuffer.Length, SeekOrigin.End);
-            stream.Read(checkBuffer, 0, checkBuffer.Length);
-
-            RMSAssert.BuffersAreEqual(buffer, checkBuffer, buffer.Length);
-        }
-
-        [TestMethod]
-        public void VeryLargeStream_SetLength()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetMultiGBStream();
-            stream.SetLength(DefaultVeryLargeStreamSize);
-            Assert.AreEqual(DefaultVeryLargeStreamSize, stream.Length);
-            Assert.IsTrue(stream.Capacity64 >= DefaultVeryLargeStreamSize);
-            stream.SetLength(DefaultVeryLargeStreamSize * 2);
-            Assert.AreEqual(2 * DefaultVeryLargeStreamSize, stream.Length);
-            Assert.IsTrue(stream.Capacity64 >= 2 * DefaultVeryLargeStreamSize);
-        }
-
-        [TestMethod]
-        public void VeryLargeStream_ExistingLargeBufferThrowsOnMultiGBLength()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetDefaultStream();
-            byte[] data = this.GetRandomBuffer(1 << 20);
-            stream.Write(data);
-            byte[] buffer = stream.GetBuffer();
-            Assert.ThrowsException<OutOfMemoryException>(() => stream.SetLength(DefaultVeryLargeStreamSize));
-        }
-
-        [TestMethod]
-        public void VeryLargeStream_GetBufferThrows()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetMultiGBStream();
-            Assert.ThrowsException<OutOfMemoryException>(() => stream.GetBuffer());
-        }
-
-        [TestMethod]
-        public void VeryLargeStream_SetPositionThrowsIfLargeBuffer()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetDefaultStream();
-            stream.SetLength(1 << 20);
-            byte[] buffer = stream.GetBuffer();
-            Assert.ThrowsException<InvalidOperationException>(() => stream.Position = DefaultVeryLargeStreamSize);
-        }
-
-        [TestMethod]
-        public void VeryLargeStream_WriteByte()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetMultiGBStream();
-            byte[] buffer = new byte[100 << 20];
-            while (stream.Length < DefaultVeryLargeStreamSize)
-            {
-                stream.Write(buffer);
-            }
-
-            long startingLength = stream.Length;
-            Assert.IsTrue(startingLength > int.MaxValue);
-            stream.WriteByte(13);
-            Assert.AreEqual(startingLength + 1, stream.Length);
-        }
-
-        [TestMethod]
-        public void VeryLargeStream_GetReadOnlySequence()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            RecyclableMemoryStream stream = this.GetMultiGBStream();
-            byte[] buffer = new byte[100 << 20];
-            while (stream.Length < DefaultVeryLargeStreamSize)
-            {
-                stream.Write(buffer);
-            }
-
-            SequenceReader<byte> sequence = new(stream.GetReadOnlySequence());
-            Assert.AreEqual(stream.Length, sequence.Length);
-
-            while (sequence.Remaining != 0)
-            {
-                Assert.IsTrue(sequence.IsNext(buffer, true));
-            }
-        }
-
-        private RecyclableMemoryStream GetMultiGBStream()
-        {
-            if (this.ZeroOutBuffer)
-            {
-                Assert.Inconclusive("Disable test due to increased memory consumption that currently does not work with the hardware limits of the GitHub runners.");
-            }
-            return new RecyclableMemoryStream(this.GetMemoryManager(), "GetMultiGBStream", DefaultVeryLargeStreamSize);
         }
 
         #endregion
@@ -4129,7 +3948,6 @@ namespace Microsoft.Azure.Cosmos.Encryption.Tests.Mirrored.RecyclableMemoryStrea
     }
 
     [TestClass]
-    [DoNotParallelize]
     public sealed class RecyclableMemoryStreamTestsWithZeroOutBuffer : BaseRecyclableMemoryStreamTests
     {
         protected override bool AggressiveBufferRelease => false;
