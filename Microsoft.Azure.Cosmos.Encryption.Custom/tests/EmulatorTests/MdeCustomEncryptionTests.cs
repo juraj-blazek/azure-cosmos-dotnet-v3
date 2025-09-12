@@ -85,7 +85,20 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.EmulatorTests
         }
 
         [TestMethod]
-        public async Task EncryptionCreateDek()
+        [DataRow(true)]
+        [DataRow(false)]
+        public async Task InitializeAsyncFailsWhenCalledMultipleTimes(bool isAsync)
+        {
+            CosmosDataEncryptionKeyProvider dekProvider = await InitializeProviderAsync(isAsync);
+
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(async () => await dekProvider.InitializeAsync(database, keyContainer.Id));
+            Assert.ThrowsException<InvalidOperationException>(() => dekProvider.Initialize(keyContainer));
+        }
+
+        [TestMethod]
+        [DataRow(true)]
+        [DataRow(false)]
+        public async Task EncryptionCreateDek(bool isAsync)
         {
             string dekId = "anotherDek";
             DataEncryptionKeyProperties dekProperties = await CreateDekAsync(MdeCustomEncryptionTests.dekProvider, dekId);
@@ -94,8 +107,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom.EmulatorTests
                 dekProperties.EncryptionKeyWrapMetadata);
 
             // Use different DEK provider to avoid (unintentional) cache impact
-            CosmosDataEncryptionKeyProvider dekProvider = new(new TestEncryptionKeyStoreProvider());
-            await dekProvider.InitializeAsync(database, keyContainer.Id);
+            CosmosDataEncryptionKeyProvider dekProvider = await InitializeProviderAsync(isAsync);
             DataEncryptionKeyProperties readProperties = await dekProvider.DataEncryptionKeyContainer.ReadDataEncryptionKeyAsync(dekId);
             Assert.AreEqual(dekProperties, readProperties);
         }
@@ -2568,6 +2580,19 @@ cancellationToken) =>
             encryptionContainer = itemContainer.WithEncryptor(encryptor);
         }
 
+        private static async Task<CosmosDataEncryptionKeyProvider> InitializeProviderAsync(bool isAsync)
+        {
+            CosmosDataEncryptionKeyProvider dekProvider = new(new TestEncryptionKeyStoreProvider());
+            if (isAsync)
+            {
+                await dekProvider.InitializeAsync(database, keyContainer.Id);
+            }
+            else
+            {
+                dekProvider.Initialize(keyContainer);
+            }
+            return dekProvider;
+        }
 
         private static async Task<ItemResponse<TestDoc>> CreateItemAsyncUsingLegacyAlgorithm(
            Container container,

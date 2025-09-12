@@ -187,7 +187,7 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
             this.container = container ?? throw new ArgumentNullException(nameof(container));
         }
 
-            /// <inheritdoc/>
+        /// <inheritdoc/>
         public override async Task<DataEncryptionKey> FetchDataEncryptionKeyWithoutRawKeyAsync(
             string id,
             string encryptionAlgorithm,
