@@ -170,10 +170,24 @@ namespace Microsoft.Azure.Cosmos.Encryption.Custom
                     nameof(containerId));
             }
 
-            this.container = containerResponse.Container;
+            this.Initialize(containerResponse.Container);
         }
 
-        /// <inheritdoc/>
+        /// <summary>
+        /// Initialize Cosmos DB container for CosmosDataEncryptionKeyProvider to store wrapped DEKs
+        /// </summary>
+        /// <param name="container">Container</param>
+        public void Initialize(Container container)
+        {
+            if (this.container != null)
+            {
+                throw new InvalidOperationException($"{nameof(CosmosDataEncryptionKeyProvider)} has already been initialized.");
+            }
+
+            this.container = container ?? throw new ArgumentNullException(nameof(container));
+        }
+
+            /// <inheritdoc/>
         public override async Task<DataEncryptionKey> FetchDataEncryptionKeyWithoutRawKeyAsync(
             string id,
             string encryptionAlgorithm,
